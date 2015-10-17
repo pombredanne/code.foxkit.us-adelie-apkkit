@@ -15,6 +15,10 @@ pkgname = {{ package.name }}
 pkgver = {{ package.version }}
 pkgdesc = {{ package.description }}
 arch = {{ package.arch }}
+size = {{ package.size }}
+{%- if package.url %}
+url = {{ package.url }}
+{%- endif %}
 {%- if package.provides %}{%- for provided in package.provides %}
 provides = {{ provided }}
 {%- endfor %}{%- endif %}
@@ -24,6 +28,7 @@ depends = {{ depend }}
 {%- if package.data_hash %}
 datahash = {{ package.data_hash }}
 {%- endif %}
+
 """)
 """The template used for generating .PKGINFO"""
 
