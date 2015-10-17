@@ -123,7 +123,7 @@ class Package:
         .. note:: To write a file, see the :py:meth:`.write_pkginfo` helper
                   method.
         """
-        return PKGINFO_TEMPLATE.render(builduser=os.environ.get('USER', '?'),
+        return PKGINFO_TEMPLATE.render(builduser=os.getenv('USER', '?'),
                                        buildhost=os.uname().nodename,
                                        package=self)
 
