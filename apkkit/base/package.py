@@ -1,7 +1,11 @@
 """Contains the Package class and related helper classes and functions."""
 
 from jinja2 import Template
+import logging
 import os
+
+
+PACKAGE_LOGGER = logging.getLogger(__name__)
 
 
 PKGINFO_TEMPLATE = Template("""
@@ -17,6 +21,9 @@ provides = {{ provided }}
 {%- if package.depends %}{%- for depend in package.depends %}
 depends = {{ depend }}
 {%- endfor %}{%- endif %}
+{%- if package.data_hash %}
+datahash = {{ package.data_hash }}
+{%- endif %}
 """)
 """The template used for generating .PKGINFO"""
 
@@ -25,7 +32,7 @@ class Package:
     """The base package class."""
 
     def __init__(self, name, version, arch, description=None, url=None, size=0,
-                 provides=None, depends=None):
+                 provides=None, depends=None, **kwargs):
         """Initialise a package object.
 
         :param str name:
@@ -66,6 +73,12 @@ class Package:
         self._provides = provides or list()
         self._depends = depends or list()
 
+        if '_datahash' in kwargs:
+            self._datahash = kwargs.pop('_datahash')
+
+        if len(kwargs) > 0:
+            PACKAGE_LOGGER.warning("unknown kwargs in Package: %r", kwargs)
+
     @property
     def name(self):
         """The name of the package."""
@@ -91,6 +104,17 @@ class Package:
         """The installed size of the package in bytes."""
         return self._size
 
+    @size.setter
+    def size(self, new_size):
+        """Change the installed size of the package in bytes.
+
+        .. warning: Internal use only!
+
+        :param int new_size:
+            The new installed size of the package.
+        """
+        self._size = new_size
+
     @property
     def arch(self):
         """The architecture of the package."""
@@ -105,6 +129,16 @@ class Package:
     def depends(self):
         """The dependencies of the package."""
         return self._depends
+
+    @property
+    def data_hash(self):
+        """The hash of the package's data, or None if not available."""
+        return getattr(self, '_datahash', None)
+
+    @data_hash.setter
+    def data_hash(self, hash_):
+        """Set the hash of the package's data."""
+        self._datahash = hash_
 
     def __repr__(self):
         return 'Package(name="{name}", version="{ver}", arch="{arch}", '\
@@ -144,7 +178,8 @@ class Package:
         params = {}
         param_map = {'pkgname': 'name', 'pkgver': 'version', 'arch': 'arch',
                      'pkgdesc': 'description', 'provides': 'provides',
-                     'depend': 'depends', 'url': 'url', 'size': 'size'}
+                     'depend': 'depends', 'url': 'url', 'size': 'size',
+                     'datahash': '_datahash'}
         list_keys = {'provides', 'depend'}
 
         params['provides'] = list()
@@ -159,7 +194,7 @@ class Package:
                 continue
 
             if line.index('=') == -1:
-                print('!!! malformed line? {} !!!'.format(line))
+                PACKAGE_LOGGER.warning('!!! malformed line? "%s" !!!', line)
                 continue
 
             (key, value) = line.split('=', 1)
@@ -172,6 +207,6 @@ class Package:
                 else:
                     params[param_map[key]] = value
             else:
-                print('!!! unrecognised PKGINFO key {} !!!'.format(key))
+                PACKAGE_LOGGER.info('!!! unrecognised PKGINFO key %s !!!', key)
 
         return cls(**params)
