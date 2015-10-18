@@ -2,6 +2,7 @@
 
 from apkkit.base.package import Package
 from apkkit.io.util import recursive_size
+from getpass import getpass
 import glob
 import gzip
 import hashlib
@@ -19,9 +20,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 try:
-    import rsa
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
 except ImportError:
-    LOGGER.warning("RSA module is not available - signing packages won't work.")
+    LOGGER.warning("cryptography module is unavailable - can't sign packages.")
 
 
 def _ensure_no_debug(filename):
@@ -36,7 +39,7 @@ def _sign_control(control, privkey, pubkey):
     """Sign control.tar.
 
     :param control:
-        A file-like object representing the current control.tar.
+        A file-like object representing the current control.tar.gz.
 
     :param privkey:
         The path to the private key.
@@ -46,12 +49,22 @@ def _sign_control(control, privkey, pubkey):
         signature, so it must match /etc/apk/keys/<name>).
 
     :returns:
-        A file-like object representing the signed control.tar.
+        A file-like object representing the signed control.tar.gz.
     """
-    control.seek(0)
-    control_hash = hashlib.sha256(control.read())
+    signature = None
 
-    signature = b'signed sha256sum here'
+    with open(privkey, "rb") as key_file:
+        private_key = serialization.load_pem_private_key(
+            key_file.read(),
+            password=getpass() or None,
+            backend=default_backend()
+        )
+        signer = private_key.signer(padding.PKCS1v15(), hashes.SHA1())
+        signer.update(control.getvalue())
+        signature = signer.finalize()
+        del signer
+        del private_key
+
     iosignature = io.BytesIO(signature)
 
     new_control = io.BytesIO()
@@ -60,12 +73,88 @@ def _sign_control(control, privkey, pubkey):
     tarinfo.size = len(signature)
     new_control_tar.addfile(tarinfo, fileobj=iosignature)
 
-    control.seek(0)
-    new_control.seek(0, 2)
-
-    shutil.copyfileobj(control, new_control)
     new_control.seek(0)
-    return new_control
+    controlgz = io.BytesIO()
+    with gzip.GzipFile(mode='wb', fileobj=controlgz) as gzobj:
+        shutil.copyfileobj(new_control, gzobj)
+
+    control.seek(0)
+    controlgz.seek(0, 2)
+    shutil.copyfileobj(control, controlgz)
+
+    controlgz.seek(0)
+
+    new_control_tar.close()
+    new_control.close()
+    return controlgz
+
+
+def _make_data_tgz(datadir, mode):
+    """Make the data.tar.gz file.
+
+    :param str datadir:
+        The base directory for the package's data.
+
+    :param str mode:
+        The mode to open the file ('x' or 'w').
+
+    :returns:
+        A file-like object representing the data.tar.gz file.
+    """
+    fd, pkg_data_path = mkstemp(prefix='apkkit-', suffix='.tar')
+    gzio = io.BytesIO()
+
+    with os.fdopen(fd, 'xb') as fdfile:
+        with tarfile.open(mode=mode, fileobj=fdfile,
+                          format=tarfile.PAX_FORMAT) as data:
+            for item in glob.glob(datadir + '/*'):
+                data.add(item, arcname=os.path.basename(item),
+                            exclude=_ensure_no_debug)
+
+        LOGGER.info('Hashing data.tar [pass 1]...')
+        fdfile.seek(0)
+        abuild_pipe = Popen(['abuild-tar', '--hash'], stdin=fdfile,
+                            stdout=PIPE)
+
+        LOGGER.info('Compressing data...')
+        with gzip.GzipFile(mode='wb', fileobj=gzio) as gzobj:
+            gzobj.write(abuild_pipe.communicate()[0])
+
+    return gzio
+
+
+def _make_control_tgz(package, mode):
+    """Make the control.tar.gz file.
+
+    :param package:
+        The :py:class:`~apkkit.base.package.Package` instance for the package.
+
+    :param str mode:
+        The mode to use for control.tar ('x' or 'w').
+
+    :returns:
+        A file-like object representing the control.tar.gz file.
+    """
+    gzio = io.BytesIO()
+    control = io.BytesIO()
+
+    control_tar = tarfile.open(mode=mode, fileobj=control)
+
+    ioinfo = io.BytesIO(package.to_pkginfo().encode('utf-8'))
+    tarinfo = tarfile.TarInfo('.PKGINFO')
+    ioinfo.seek(0, 2)
+    tarinfo.size = ioinfo.tell()
+    ioinfo.seek(0)
+
+    control_tar.addfile(tarinfo, fileobj=ioinfo)
+
+    control.seek(0)
+    with gzip.GzipFile(mode='wb', fileobj=gzio) as control_obj:
+        shutil.copyfileobj(control, control_obj)
+
+    control_tar.close()
+
+    return gzio
 
 
 class APKFile:
@@ -122,48 +211,23 @@ class APKFile:
         else:
             mode = 'w'
 
-        fd, pkg_data_path = mkstemp(prefix='apkkit-', suffix='.tar')
-        gzio = io.BytesIO()
-
         LOGGER.info('Creating data.tar...')
-        with os.fdopen(fd, 'xb') as fdfile:
-            with tarfile.open(mode=mode, fileobj=fdfile,
-                              format=tarfile.PAX_FORMAT) as data:
-                for item in glob.glob(datadir + '/*'):
-                    data.add(item, arcname=os.path.basename(item),
-                             exclude=_ensure_no_debug)
-
-            LOGGER.info('Hashing data.tar [pass 1]...')
-            fdfile.seek(0)
-            abuild_pipe = Popen(['abuild-tar', '--hash'], stdin=fdfile,
-                                stdout=PIPE)
-
-            LOGGER.info('Compressing data...')
-            with gzip.GzipFile(mode='wb', fileobj=gzio) as gzobj:
-                gzobj.write(abuild_pipe.communicate()[0])
+        data_gzio = _make_data_tgz(datadir, mode)
 
         # make the datahash
         if data_hash:
             LOGGER.info('Hashing data.tar [pass 2]...')
-            gzio.seek(0)
-            hasher = getattr(hashlib, hash_method)(gzio.read())
+            data_gzio.seek(0)
+            hasher = getattr(hashlib, hash_method)(data_gzio.read())
             package.data_hash = hasher.hexdigest()
 
         # if we made the hash, we need to seek back again
         # if we didn't, we haven't seeked back yet
-        gzio.seek(0)
+        data_gzio.seek(0)
 
         # we are finished with fdfile (data.tar), now let's make control
         LOGGER.info('Creating package header...')
-
-        control = io.BytesIO()
-        control_tar = tarfile.open(mode=mode, fileobj=control)
-        ioinfo = io.BytesIO(package.to_pkginfo().encode('utf-8'))
-        tarinfo = tarfile.TarInfo('.PKGINFO')
-        ioinfo.seek(0, 2)
-        tarinfo.size = ioinfo.tell()
-        ioinfo.seek(0)
-        control_tar.addfile(tarinfo, fileobj=ioinfo)
+        controlgz = _make_control_tgz(package, mode)
 
         # we do NOT close control_tar yet, because we don't want the end of
         # archive written out.
@@ -172,22 +236,15 @@ class APKFile:
             signfile = os.getenv('PACKAGE_PRIVKEY', signfile)
             pubkey = os.getenv('PACKAGE_PUBKEY',
                                os.path.basename(signfile) + '.pub')
-            control = _sign_control(control, signfile, pubkey)
-
-        LOGGER.info('Compressing package header...')
-        controlgz = io.BytesIO()
-        with gzip.GzipFile(mode='wb', fileobj=controlgz) as gzobj:
-            shutil.copyfileobj(control, gzobj)
-        control_tar.close()  # we are done with it now
-        controlgz.seek(0)
+            controlgz = _sign_control(controlgz, signfile, pubkey)
 
         LOGGER.info('Creating package file (in memory)...')
         combined = io.BytesIO()
         shutil.copyfileobj(controlgz, combined)
-        shutil.copyfileobj(gzio, combined)
+        shutil.copyfileobj(data_gzio, combined)
 
         controlgz.close()
-        gzio.close()
+        data_gzio.close()
 
         return cls(fileobj=combined, package=package)
 
