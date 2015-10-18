@@ -59,7 +59,7 @@ def _sign_control(control, privkey, pubkey):
             password=getpass() or None,
             backend=default_backend()
         )
-        signer = private_key.signer(padding.PKCS1v15(), hashes.SHA1())
+        signer = private_key.signer(padding.PKCS1v15(), hashes.SHA256())
         signer.update(control.getvalue())
         signature = signer.finalize()
         del signer
