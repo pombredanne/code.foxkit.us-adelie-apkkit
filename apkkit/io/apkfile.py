@@ -178,7 +178,7 @@ class APKFile:
 
     @classmethod
     def create(cls, package, datadir, sign=True, signfile=None, data_hash=True,
-               hash_method='sha1'):
+               hash_method='sha256'):
         """Create an APK file in memory from a package and data directory.
 
         :param package:
@@ -197,8 +197,7 @@ class APKFile:
             Whether to hash the data (default True).
 
         :param str hash_method:
-            The hash method to use for hashing the data - default is sha1 to
-            maintain compatibility with upstream apk-tools.
+            The hash method to use for hashing the data - default is sha256.
         """
         LOGGER.info('Creating APK from data in: %s', datadir)
         package.size = recursive_size(datadir)
