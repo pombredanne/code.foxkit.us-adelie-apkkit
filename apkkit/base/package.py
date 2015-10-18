@@ -23,7 +23,7 @@ url = {{ package.url }}
 provides = {{ provided }}
 {%- endfor %}{%- endif %}
 {%- if package.depends %}{%- for depend in package.depends %}
-depends = {{ depend }}
+depend = {{ depend }}
 {%- endfor %}{%- endif %}
 {%- if package.data_hash %}
 datahash = {{ package.data_hash }}
