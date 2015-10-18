@@ -23,8 +23,8 @@ need a pure Python library for manipulating and verifying APK packages.  We also
 need a pure Python library for maintaining APK repositories.
 
 
-Objectives / success critera
-----------------------------
+Objectives / success criteria
+-----------------------------
 * Compatibility with upstream APK Tools.
 * Stable v1 release by October 2015.
 * Minimal to no external dependencies.
