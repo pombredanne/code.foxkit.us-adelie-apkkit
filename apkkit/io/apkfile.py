@@ -48,11 +48,8 @@ def _tar_filter(filename):
     """tarfile exclusion predicate that calls all defined filter functions."""
     global FILTERS
 
-    for func in FILTERS:
-        if func(filename):
-            return True
-
-    return False
+    results = [func(filename) for func in FILTERS]
+    return all(results)
 
 
 def _ensure_no_debug(filename):
