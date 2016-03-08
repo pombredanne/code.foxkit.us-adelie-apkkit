@@ -27,6 +27,34 @@ except ImportError:
     LOGGER.warning("cryptography module is unavailable - can't sign packages.")
 
 
+FILTERS = None
+
+
+def _add_filter_func(func):
+    """Add a callable to filter files out of the created data.tar.gz.
+
+    :param callable func:
+        The callable.  It will be passed a single parameter, filename.
+    """
+    global FILTERS
+
+    if FILTERS is None:
+        FILTERS = set()
+
+    FILTERS.add(func)
+
+
+def _tar_filter(filename):
+    """tarfile exclusion predicate that calls all defined filter functions."""
+    global FILTERS
+
+    for func in FILTERS:
+        if func(filename):
+            return True
+
+    return False
+
+
 def _ensure_no_debug(filename):
     """tarfile exclusion predicate to ensure /usr/lib/debug isn't included.
 
@@ -54,10 +82,14 @@ def _sign_control(control, privkey, pubkey):
     signature = None
 
     with open(privkey, "rb") as key_file:
+        #password = getpass()
+        #if password != '':
+        #    password.encode('utf-8')
+        #else:
+        password = None
+
         private_key = serialization.load_pem_private_key(
-            key_file.read(),
-            password=getpass() or None,
-            backend=default_backend()
+            key_file.read(), password=password, backend=default_backend()
         )
         signer = private_key.signer(padding.PKCS1v15(), hashes.SHA256())
         signer.update(control.getvalue())
@@ -109,7 +141,7 @@ def _make_data_tgz(datadir, mode):
                           format=tarfile.PAX_FORMAT) as data:
             for item in glob.glob(datadir + '/*'):
                 data.add(item, arcname=os.path.basename(item),
-                            exclude=_ensure_no_debug)
+                         exclude=_tar_filter)
 
         LOGGER.info('Hashing data.tar [pass 1]...')
         fdfile.seek(0)
@@ -178,7 +210,7 @@ class APKFile:
 
     @classmethod
     def create(cls, package, datadir, sign=True, signfile=None, data_hash=True,
-               hash_method='sha256'):
+               hash_method='sha256', **kwargs):
         """Create an APK file in memory from a package and data directory.
 
         :param package:
@@ -199,6 +231,17 @@ class APKFile:
         :param str hash_method:
             The hash method to use for hashing the data - default is sha256.
         """
+
+        # ensure no stale filters are applied.
+        global FILTERS
+        FILTERS = None
+
+        if 'filters' in kwargs:
+            [_add_filter_func(func) for func in kwargs.pop('filters')]
+
+        # XXX what about -debug split packages?  they need this.
+        _add_filter_func(_ensure_no_debug)
+
         LOGGER.info('Creating APK from data in: %s', datadir)
         package.size = recursive_size(datadir)
 
