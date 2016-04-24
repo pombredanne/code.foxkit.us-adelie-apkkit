@@ -168,6 +168,9 @@ def native(settings, mydbapi=None):
         op = dep.operator
         ver = dep.version
 
+        if dep.blocker:
+            package = '!' + package
+
         if op is None and ver is None:
             # "Easy" dep.
             params['depends'].append(package)
@@ -176,8 +179,6 @@ def native(settings, mydbapi=None):
         # apk-tools/src/package.c:195
         # there is literally no other documentation for this format.
         apk_format = '{name}{op}{ver}'.format(name=package, op=op, ver=ver)
-        if dep.blocker is not False:
-            apk_format = '!' + apk_format
         params['depends'].append(apk_format)
 
     package = Package(**params)
