@@ -88,13 +88,15 @@ pkg_trigger() {
 ```
 """
 
-from apkkit.base.package import Package
-from apkkit.io.apkfile import APKFile
 import logging
 import os
-from portage import db
-from portage.dep import Atom, use_reduce
 import sys
+
+import portage
+from portage.dep import Atom, use_reduce
+
+from apkkit.base.package import Package
+from apkkit.io.apkfile import APKFile
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -104,7 +106,9 @@ ARCH_MAP = {'amd64': 'x86_64', 'hppa': 'parisc'}
 """Mapping for architectures that have the wrong name in Portage."""
 
 
-VARDB = db['/']['vartree'].dbapi
+# for some reason, it thinks there's no portage.db.  pylint: disable=no-member
+VARDB = portage.db['/']['vartree'].dbapi
+# pylint: enable=no-member
 
 
 def _fatal(msg):
@@ -142,6 +146,43 @@ def _maybe_xlat(pn, category):
     return pn
 
 
+def _translate_dep(dep):
+    category, package = dep.cp.split('/', 1)
+    package = _maybe_xlat(package, category)
+    if dep.slot:
+        if dep.slot != "0":
+            package += dep.slot
+    elif package != 'ncurses':  # so especially broken it's special cased
+        potentials = VARDB.match(dep)
+        potential_slots = set([pot.slot for pot in potentials])
+        if len(potential_slots) > 1:
+            msg = 'Dependency for {name} has multiple candidate slots,'
+            msg += ' and no single slot can be resolved.'
+            _fatal(msg.format(name=dep))
+            sys.exit(-1)
+        elif len(potential_slots) == 1:
+            slot = potential_slots.pop()
+            if slot and slot != '0':
+                package += slot
+        else:
+            pass  # We assume no slot.
+    dep_op = dep.operator
+    ver = dep.version
+
+    if dep.blocker:
+        package = '!' + package
+
+    if dep_op is None and ver is None:
+        # "Easy" dep.
+        return package
+
+    if dep_op == '~':
+        dep_op = '='  # broken
+    # apk-tools/src/package.c:195
+    # there is literally no other documentation for this format.
+    return '{name}{op}{ver}'.format(name=package, op=dep_op, ver=ver)
+
+
 def native(settings, mydbapi=None):
     """Take a Portage settings object and turn it into an APK.
 
@@ -164,7 +205,6 @@ def native(settings, mydbapi=None):
     params['version'] = settings['PVR']  # include -rX if necessary
     params['arch'] = ARCH_MAP.get(settings['ARCH'], settings['ARCH'])
     params['provides'] = list()
-    params['depends'] = list()
 
     cpv = '%s/%s' % (settings['CATEGORY'], settings['PF'])
     if mydbapi is None or not mydbapi.cpv_exists(cpv):
@@ -178,41 +218,8 @@ def native(settings, mydbapi=None):
     run_deps = use_reduce(mydbapi.aux_get(cpv, ('RDEPEND',)),
                           uselist=settings['USE'], opconvert=True,
                           token_class=Atom, eapi=settings['EAPI'])
-    for dep in run_deps:
-        category, package = dep.cp.split('/', 1)
-        package = _maybe_xlat(package, category)
-        if dep.slot:
-            if dep.slot != "0":
-                package += dep.slot
-        elif package != 'ncurses':  # so especially broken it's special cased
-            potentials = VARDB.match(dep)
-            potential_slots = set([pot.slot for pot in potentials])
-            if len(potential_slots) > 1:
-                msg = 'Dependency for {name} has multiple candidate slots,'
-                msg += ' and no single slot can be determined.'
-                _fatal(msg.format(name=dep))
-                sys.exit(-1)
-            elif len(potential_slots) == 1:
-                slot = potential_slots.pop()
-                if slot and slot != '0':
-                    package += slot
-            else:
-                pass  # We assume no slot.
-        op = dep.operator
-        ver = dep.version
 
-        if dep.blocker:
-            package = '!' + package
-
-        if op is None and ver is None:
-            # "Easy" dep.
-            params['depends'].append(package)
-            continue
-
-        # apk-tools/src/package.c:195
-        # there is literally no other documentation for this format.
-        apk_format = '{name}{op}{ver}'.format(name=package, op=op, ver=ver)
-        params['depends'].append(apk_format)
+    params['depends'] = map(_translate_dep, run_deps)
 
     package = Package(**params)
     apk = APKFile.create(package, settings['D'])
@@ -223,6 +230,6 @@ def native(settings, mydbapi=None):
     return 0
 
 if __name__ == '__main__':
-    import portage
     print("You are calling from the shell, this is not supported!")
+    # pylint: disable=no-member
     native(os.environ, portage.db['/']['porttree'].dbapi)
