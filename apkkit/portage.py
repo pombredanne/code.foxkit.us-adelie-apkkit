@@ -183,6 +183,26 @@ def _translate_dep(dep):
     return '{name}{op}{ver}'.format(name=package, op=dep_op, ver=ver)
 
 
+def _maybe_package_provides(settings):
+    """Determine if this package provides SONAMEs."""
+
+    build_info = os.path.join(settings['PORTAGE_BUILDDIR'], 'build-info')
+    provides = os.path.join(build_info, 'PROVIDES')
+    if os.path.exists(provides):
+        with open(provides, 'r') as provide_file:
+            provide_lines = provide_file.readlines()
+    else:
+        provide_lines = []
+
+    for line in provide_lines:
+        if line.startswith(settings['ARCH'] + ': '):
+            # We have some SONAMEs!  Chop the arch name off.
+            sonames = line.split()[1:]
+            return ['so:' + soname for soname in sonames]
+
+    return []
+
+
 def native(settings, mydbapi=None):
     """Take a Portage settings object and turn it into an APK.
 
@@ -220,6 +240,8 @@ def native(settings, mydbapi=None):
                           token_class=Atom, eapi=settings['EAPI'])
 
     params['depends'] = map(_translate_dep, run_deps)
+
+    params['provides'] = _maybe_package_provides(settings)
 
     package = Package(**params)
     apk = APKFile.create(package, settings['D'])
