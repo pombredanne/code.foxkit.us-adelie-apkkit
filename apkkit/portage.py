@@ -286,6 +286,5 @@ def native(settings, mydbapi=None):
     return 0
 
 if __name__ == '__main__':
-    print("You are calling from the shell, this is not supported!")
     # pylint: disable=no-member
     native(os.environ, portage.db['/']['porttree'].dbapi)
