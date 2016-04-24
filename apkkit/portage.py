@@ -92,6 +92,7 @@ from apkkit.base.package import Package
 from apkkit.io.apkfile import APKFile
 import logging
 import os
+from portage import db
 from portage.dep import Atom, use_reduce
 import sys
 
@@ -101,6 +102,20 @@ logging.basicConfig(level=logging.DEBUG)
 
 ARCH_MAP = {'amd64': 'x86_64', 'hppa': 'parisc'}
 """Mapping for architectures that have the wrong name in Portage."""
+
+
+VARDB = db['/']['vartree'].dbapi
+
+
+def _fatal(msg):
+    """Print a fatal error to the user.
+
+    :param str msg:
+        The message to print.
+    """
+
+    print('\033[01;31m *\033[01;39m An APK cannot be created.')
+    print('\033[01;31m *\033[00;39m {msg}'.format(msg=msg))
 
 
 def _maybe_xlat(pn, category):
@@ -144,7 +159,8 @@ def native(settings, mydbapi=None):
     params['name'] = _maybe_xlat(settings['PN'], settings['CATEGORY'])
     if 'SLOT' in settings and not settings['SLOT'].startswith('0/') and\
        settings['SLOT'] != '0':
-        params['name'] += settings['SLOT']
+        slot = settings['SLOT'].split('/')[0]
+        params['name'] += slot
     params['version'] = settings['PVR']  # include -rX if necessary
     params['arch'] = ARCH_MAP.get(settings['ARCH'], settings['ARCH'])
     params['provides'] = list()
@@ -152,7 +168,7 @@ def native(settings, mydbapi=None):
 
     cpv = '%s/%s' % (settings['CATEGORY'], settings['PF'])
     if mydbapi is None or not mydbapi.cpv_exists(cpv):
-        print('!!! Fatal error: CPV does not exist or DBAPI is missing')
+        _fatal('CPV does not exist or DBAPI is missing')
         sys.exit(-1)
 
     desc, url = mydbapi.aux_get(cpv, ('DESCRIPTION', 'HOMEPAGE'))
@@ -165,6 +181,23 @@ def native(settings, mydbapi=None):
     for dep in run_deps:
         category, package = dep.cp.split('/', 1)
         package = _maybe_xlat(package, category)
+        if dep.slot:
+            if dep.slot != "0":
+                package += dep.slot
+        elif package != 'ncurses':  # so especially broken it's special cased
+            potentials = VARDB.match(dep)
+            potential_slots = set([pot.slot for pot in potentials])
+            if len(potential_slots) > 1:
+                msg = 'Dependency for {name} has multiple candidate slots,'
+                msg += ' and no single slot can be determined.'
+                _fatal(msg.format(name=dep))
+                sys.exit(-1)
+            elif len(potential_slots) == 1:
+                slot = potential_slots.pop()
+                if slot and slot != '0':
+                    package += slot
+            else:
+                pass  # We assume no slot.
         op = dep.operator
         ver = dep.version
 
