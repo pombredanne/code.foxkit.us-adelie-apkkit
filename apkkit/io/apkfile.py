@@ -1,8 +1,5 @@
 """I/O classes and helpers for APK files."""
 
-from apkkit.base.package import Package
-from apkkit.io.util import recursive_size
-from getpass import getpass
 import glob
 import gzip
 import hashlib
@@ -10,16 +7,24 @@ import io
 import logging
 import os
 import shutil
-from subprocess import Popen, PIPE
 import sys
 import tarfile
+import yaml
+
+from copy import copy
+from functools import partial
+from itertools import chain
+from subprocess import Popen, PIPE
 from tempfile import mkstemp
 
+from apkkit.base.package import Package
+from apkkit.io.util import recursive_size
 
 LOGGER = logging.getLogger(__name__)
 
 
 try:
+    # we need LOGGER.  pylint: disable=wrong-import-order,wrong-import-position
     from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
@@ -27,38 +32,88 @@ except ImportError:
     LOGGER.warning("cryptography module is unavailable - can't sign packages.")
 
 
-FILTERS = None
+def load_global_split():
+    """Load global split package information from split-global.conf."""
+
+    try:
+        with open('/etc/apkkit/split/global.conf') as splitconf:
+            splits = list(yaml.safe_load_all(splitconf))
+    except OSError:
+        LOGGER.error('No global split package information file.')
+        splits = []
+
+    return splits
 
 
-def _add_filter_func(func):
-    """Add a callable to filter files out of the created data.tar.gz.
+def load_package_split(package):
+    """Load specific split package information for the specified package.
 
-    :param callable func:
-        The callable.  It will be passed a single parameter, filename.
+    :param package:
+        The package for which to load information.
     """
-    global FILTERS
 
-    if FILTERS is None:
-        FILTERS = set()
+    path = '/etc/apkkit/split/{name}'.format(name=package.name)
+    try:
+        with open(path + '/' + package.version + '.conf') as splitconf:
+            splits = list(yaml.safe_load_all(splitconf))
+    except OSError:
+        try:
+            with open(path + '.conf') as splitconf:
+                splits = list(yaml.safe_load_all(splitconf))
+        except OSError:
+            LOGGER.debug('No split package information for %s', package.name)
+            splits = []
 
-    FILTERS.add(func)
+    return splits
 
 
-def _tar_filter(filename):
-    """tarfile exclusion predicate that calls all defined filter functions."""
-    global FILTERS
+def path_components(path):
+    """Find all directories that make up a full path."""
 
-    results = [func(filename) for func in FILTERS]
-    return all(results)
+    components = [path]
+    current = path
+    while current and current != '/':
+        current, _ = os.path.split(current)
+        components.append(current)
+    return components
 
 
-def _ensure_no_debug(filename):
-    """tarfile exclusion predicate to ensure /usr/lib/debug isn't included.
+def split_filter(split_info, tar_info):
+    """Determine if a file should be included in a split package.
 
-    :returns bool: True if the file is a debug file, otherwise False.
+    :param dict split_info:
+        The split parameters loaded from configuration.
+
+    :param tar_info:
+        The TarInfo object to inspect.
     """
-    return 'usr/lib/debug' in filename
 
+    paths = set(split_info['paths'])
+    for path in split_info['paths']:
+        for component in path_components(path):
+            paths.add(component)
+
+    if any([tar_info.name.startswith(path) for path in split_info['paths']]) or\
+       any([tar_info.name == component for component in paths]):
+        return tar_info
+
+    return None
+
+
+def base_filter(exclude_from_base, tar_info):
+    """Determine if a file should be included in a base package.
+
+    :param list exclude_from_base:
+        A list of paths to exclude from the base package.
+
+    :param tar_info:
+        The TarInfo object to inspect.
+    """
+
+    if any([tar_info.name.startswith(path) for path in exclude_from_base]):
+        return None
+
+    return tar_info
 
 def _sign_control(control, privkey, pubkey):
     """Sign control.tar.
@@ -118,7 +173,7 @@ def _sign_control(control, privkey, pubkey):
     return controlgz
 
 
-def _make_data_tgz(datadir, mode):
+def _make_data_tgz(datadir, mode, package, my_filter=None):
     """Make the data.tar.gz file.
 
     :param str datadir:
@@ -127,19 +182,32 @@ def _make_data_tgz(datadir, mode):
     :param str mode:
         The mode to open the file ('x' or 'w').
 
+    :param package:
+        The Package object for this data.tar.gz file.  The 'size' parameter
+        will be set to the size of the data included.
+
+    :param callable my_filter:
+        A function passed to tarfile.add to filter contents.  Defaults to None.
+        If None, all files in datadir will be added.
+
     :returns:
         A file-like object representing the data.tar.gz file.
     """
     fd, pkg_data_path = mkstemp(prefix='apkkit-', suffix='.tar')
     gzio = io.BytesIO()
 
+    if my_filter is None:
+        my_filter = lambda x: x
+
     with os.fdopen(fd, 'xb') as fdfile:
         with tarfile.open(mode=mode, fileobj=fdfile,
                           format=tarfile.PAX_FORMAT) as data:
             for item in glob.glob(datadir + '/*'):
-                data.add(item, arcname=os.path.basename(item),
-                         exclude=_tar_filter)
+                data.add(item, arcname=os.path.basename(item), filter=my_filter)
 
+        package.size = fdfile.tell()
+        if package.size <= 10240:
+            return None
         LOGGER.info('Hashing data.tar [pass 1]...')
         fdfile.seek(0)
         abuild_pipe = Popen(['abuild-tar', '--hash'], stdin=fdfile,
@@ -205,53 +273,14 @@ class APKFile:
         else:
             self.package = package
 
-    @classmethod
-    def create(cls, package, datadir, sign=True, signfile=None, data_hash=True,
-               hash_method='sha256', **kwargs):
-        """Create an APK file in memory from a package and data directory.
-
-        :param package:
-            A :py:class:`Package` instance that describes the package.
-
-        :param datadir:
-            The path to the directory containing the package's data.
-
-        :param bool sign:
-            Whether to sign the package (default True).
-
-        :param signfile:
-            The path to the GPG key to sign the package with.
-
-        :param bool data_hash:
-            Whether to hash the data (default True).
-
-        :param str hash_method:
-            The hash method to use for hashing the data - default is sha256.
-        """
-
-        # ensure no stale filters are applied.
-        global FILTERS
-        FILTERS = None
-
-        if 'filters' in kwargs:
-            [_add_filter_func(func) for func in kwargs.pop('filters')]
-
-        # XXX what about -debug split packages?  they need this.
-        _add_filter_func(_ensure_no_debug)
-
-        LOGGER.info('Creating APK from data in: %s', datadir)
-        package.size = recursive_size(datadir)
-
-        # XXX TODO BAD RUN AWAY
-        # eventually we need to just a write tarfile replacement that can do
-        # the sign-mangling required for APK
-        if sys.version_info[:2] >= (3, 5):
-            mode = 'x'
-        else:
-            mode = 'w'
-
+    @staticmethod
+    def _create_file(package, datadir, sign, signfile, data_hash, hash_method,
+                     mode, my_filter):
         LOGGER.info('Creating data.tar...')
-        data_gzio = _make_data_tgz(datadir, mode)
+        data_gzio = _make_data_tgz(datadir, mode, package, my_filter)
+        if data_gzio is None:
+            LOGGER.info('Empty package.  Nothing to write.')
+            return None
 
         # make the datahash
         if data_hash:
@@ -285,9 +314,94 @@ class APKFile:
         controlgz.close()
         data_gzio.close()
 
-        return cls(fileobj=combined, package=package)
+        return combined
+
+
+    @classmethod
+    def create(cls, package, datadir, sign=True, signfile=None, data_hash=True,
+               hash_method='sha256', **kwargs):
+        """Create an APK file in memory from a package and data directory.
+
+        :param package:
+            A :py:class:`Package` instance that describes the package.
+
+        :param datadir:
+            The path to the directory containing the package's data.
+
+        :param bool sign:
+            Whether to sign the package (default True).
+
+        :param signfile:
+            The path to the GPG key to sign the package with.
+
+        :param bool data_hash:
+            Whether to hash the data (default True).
+
+        :param str hash_method:
+            The hash method to use for hashing the data - default is sha256.
+        """
+
+        LOGGER.info('Creating APK from data in: %s', datadir)
+
+        # XXX TODO BAD RUN AWAY
+        # eventually we need to just a write tarfile replacement that can do
+        # the sign-mangling required for APK
+        if sys.version_info[:2] >= (3, 5):
+            mode = 'x'
+        else:
+            mode = 'w'
+
+        files = []
+
+        splits = load_global_split()
+        splits += load_package_split(package)
+        splits = [split for split in splits if split is not None]
+
+        exclude_from_base = chain.from_iterable([
+            [path for path in split['paths']] for split in splits
+        ])
+
+        for split in splits:
+            split_package = copy(package)
+            split_package._pkgname = split['name'].format(name=package.name)
+
+            if 'desc' in split:
+                split_package._pkgdesc += split['desc']
+
+            if 'depends' in split:
+                split_package._depends = split['depends']
+            else:
+                split_package._depends = [package.name]
+
+            if 'provides' in split:
+                split_package._provides = split['provides']
+            else:
+                split_package._provides = []
+
+            LOGGER.info('Probing for split package: %s', split_package.name)
+            combined = APKFile._create_file(split_package, datadir, sign,
+                                            signfile, data_hash, hash_method,
+                                            mode, partial(split_filter, split))
+            if combined:
+                files.append(cls(fileobj=combined, package=split_package))
+
+        LOGGER.info('Processing main package: %s', package.name)
+        combined = APKFile._create_file(package, datadir, sign, signfile,
+                                        data_hash, hash_method, mode,
+                                        partial(base_filter, exclude_from_base))
+        if combined:
+            files.append(cls(fileobj=combined, package=package))
+
+        out_path = kwargs.pop('out_path', None)
+        if out_path:
+            for apk_file in files:
+                name = "{name}-{ver}.apk".format(name=apk_file.package.name,
+                                                 ver=apk_file.package.version)
+                apk_file.write(os.path.join(out_path, name))
 
     def write(self, path):
+        """Write the APK currently loaded to a file at path."""
+
         LOGGER.info('Writing APK to %s', path)
         self.fileobj.seek(0)
         with open(path, 'xb') as new_package:

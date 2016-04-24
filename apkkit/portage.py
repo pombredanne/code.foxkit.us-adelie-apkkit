@@ -146,6 +146,38 @@ def _maybe_xlat(pn, category):
     return pn
 
 
+def _deps_need_an_adult(name, pvr, eapi='6'):
+    """Since there are multiple options for a run-time dependency, ask the
+    local file system which one to use.
+
+    Looks in [PORTAGE_CONFIGROOT]/etc/portage/deps/name-pvr for the RDEPEND to
+    use in Adélie.
+
+    :param str name:
+        The name of the package.
+
+    :param str pvr:
+        The version + revision of the package.
+
+    :param str eapi:
+        The EAPI to use.  Defaults to 6.
+
+    :returns str:
+        A list of dependencies.
+    """
+
+    root = os.environ.get('PORTAGE_CONFIGROOT', '')
+    path = os.path.join(root, '/etc/portage/deps',
+                        '{name}-{pvr}'.format(name=name, pvr=pvr))
+    try:
+        with open(path, 'r') as dep_file:
+            deps = dep_file.readlines()
+        return [Atom(dep, eapi=eapi) for dep in deps]
+    except OSError as exc:
+        _fatal('Could not find RDEPEND for {name}'.format(name=name))
+        raise exc
+
+
 def _translate_dep(dep):
     category, package = dep.cp.split('/', 1)
     package = _maybe_xlat(package, category)
@@ -239,15 +271,17 @@ def native(settings, mydbapi=None):
                           uselist=settings['USE'], opconvert=True,
                           token_class=Atom, eapi=settings['EAPI'])
 
+    if any([isinstance(dep, list) for dep in run_deps]):
+        run_deps = _deps_need_an_adult(params['name'], settings['PVR'],
+                                       settings['EAPI'])
+
     params['depends'] = map(_translate_dep, run_deps)
 
     params['provides'] = _maybe_package_provides(settings)
 
     package = Package(**params)
-    apk = APKFile.create(package, settings['D'])
-    filename = "{name}-{ver}.apk".format(name=package.name, ver=package.version)
-    apk.write(os.path.join(settings.get('PKG_DIR', settings['PKGDIR']),
-                           filename))
+    out_path = os.path.join(settings.get('PKG_DIR', settings['PKGDIR']))
+    apk = APKFile.create(package, settings['D'], out_path=out_path)
 
     return 0
 
