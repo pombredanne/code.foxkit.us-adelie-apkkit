@@ -176,7 +176,7 @@ def native(settings, mydbapi=None):
         # apk-tools/src/package.c:195
         # there is literally no other documentation for this format.
         apk_format = '{name}{op}{ver}'.format(name=package, op=op, ver=ver)
-        if dep.blocker:
+        if dep.blocker is not False:
             apk_format = '!' + apk_format
         params['depends'].append(apk_format)
 
