@@ -180,6 +180,10 @@ def _deps_need_an_adult(name, pvr, eapi='6'):
 
 def _translate_dep(dep):
     category, package = dep.cp.split('/', 1)
+
+    if category == 'virtual':
+        return 'v:' + package
+
     package = _maybe_xlat(package, category)
     if dep.slot:
         if dep.slot != "0":
@@ -215,13 +219,15 @@ def _translate_dep(dep):
     return '{name}{op}{ver}'.format(name=package, op=dep_op, ver=ver)
 
 
-def _maybe_package_provides(settings):
+def _maybe_package_provides(settings, pkgname):
     """Determine if this package provides SONAMEs."""
 
+    provides = list()
+
     build_info = os.path.join(settings['PORTAGE_BUILDDIR'], 'build-info')
-    provides = os.path.join(build_info, 'PROVIDES')
-    if os.path.exists(provides):
-        with open(provides, 'r') as provide_file:
+    provide_path = os.path.join(build_info, 'PROVIDES')
+    if os.path.exists(provide_path):
+        with open(provide_path, 'r') as provide_file:
             provide_lines = provide_file.readlines()
     else:
         provide_lines = []
@@ -230,9 +236,15 @@ def _maybe_package_provides(settings):
         if line.startswith(settings['ARCH'] + ': '):
             # We have some SONAMEs!  Chop the arch name off.
             sonames = line.split()[1:]
-            return ['so:' + soname for soname in sonames]
+            provides += ['so:' + soname for soname in sonames]
 
-    return []
+    root = os.environ.get('PORTAGE_CONFIGROOT', '')
+    virtual_path = os.path.join(root, '/etc/apkkit/virtual', pkgname)
+    if os.path.exists(virtual_path):
+        with open(virtual_path, 'r') as virtual_file:
+            provides += ['v:' + virtual for virtual in virtual_file.readlines()]
+
+    return provides
 
 
 def native(settings, mydbapi=None):
@@ -248,6 +260,10 @@ def native(settings, mydbapi=None):
         A Portage DBAPI object for the package.
     """
     params = {}
+
+    if settings['CATEGORY'] == 'virtual':
+        _fatal("Won't make an APK for a virtual/ package.")
+        sys.exit(-1)
 
     params['name'] = _maybe_xlat(settings['PN'], settings['CATEGORY'])
     if 'SLOT' in settings and not settings['SLOT'].startswith('0/') and\
@@ -277,7 +293,7 @@ def native(settings, mydbapi=None):
 
     params['depends'] = map(_translate_dep, run_deps)
 
-    params['provides'] = _maybe_package_provides(settings)
+    params['provides'] = _maybe_package_provides(settings, params['name'])
 
     package = Package(**params)
     out_path = os.path.join(settings.get('PKG_DIR', settings['PKGDIR']))
