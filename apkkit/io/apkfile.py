@@ -204,10 +204,14 @@ def _make_data_tgz(datadir, mode, package, my_filter=None):
                           format=tarfile.PAX_FORMAT) as data:
             for item in glob.glob(datadir + '/*'):
                 data.add(item, arcname=os.path.basename(item), filter=my_filter)
+            members = [member for member in data.getmembers()
+                       if member.isfile()]
 
-        package.size = fdfile.tell()
-        if package.size <= 10240:
+        if len(members) == 0:
             return None
+
+        fdfile.seek(0, 2)
+        package.size = fdfile.tell()
         LOGGER.info('Hashing data.tar [pass 1]...')
         fdfile.seek(0)
         abuild_pipe = Popen(['abuild-tar', '--hash'], stdin=fdfile,
