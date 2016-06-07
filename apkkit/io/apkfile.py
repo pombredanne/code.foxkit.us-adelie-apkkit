@@ -361,9 +361,9 @@ class APKFile:
         splits += load_package_split(package)
         splits = [split for split in splits if split is not None]
 
-        exclude_from_base = chain.from_iterable([
+        exclude_from_base = list(chain.from_iterable([
             [path for path in split['paths']] for split in splits
-        ])
+        ]))
 
         for split in splits:
             split_package = copy(package)
