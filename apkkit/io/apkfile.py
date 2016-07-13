@@ -11,7 +11,8 @@ import sys
 import tarfile
 import yaml
 
-from copy import copy
+from copy import deepcopy
+from fnmatch import fnmatch
 from functools import partial
 from itertools import chain
 from subprocess import Popen, PIPE
@@ -94,7 +95,8 @@ def split_filter(split_info, tar_info):
             paths.add(component)
 
     if any([tar_info.name.startswith(path) for path in split_info['paths']]) or\
-       any([tar_info.name == component for component in paths]):
+       any([tar_info.name == component for component in paths]) or\
+       any([fnmatch(tar_info.name, path) for path in split_info['paths']]):
         return tar_info
 
     return None
@@ -110,7 +112,8 @@ def base_filter(exclude_from_base, tar_info):
         The TarInfo object to inspect.
     """
 
-    if any([tar_info.name.startswith(path) for path in exclude_from_base]):
+    if any([tar_info.name.startswith(path) for path in exclude_from_base]) or\
+       any([fnmatch(tar_info.name, path) for path in exclude_from_base]):
         return None
 
     return tar_info
@@ -366,7 +369,7 @@ class APKFile:
         ]))
 
         for split in splits:
-            split_package = copy(package)
+            split_package = deepcopy(package)
             split_package._pkgname = split['name'].format(name=package.name)
 
             if 'desc' in split:
