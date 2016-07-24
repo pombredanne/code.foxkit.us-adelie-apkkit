@@ -92,6 +92,7 @@ import logging
 import os
 import sys
 
+from itertools import filterfalse
 import portage
 from portage.dep import Atom, use_reduce
 
@@ -143,6 +144,16 @@ def _maybe_xlat(pn, category):
         The name to use in Adélie for the package.
     """
 
+    root = os.environ.get('PORTAGE_CONFIGROOT', '')
+    path = os.path.join(root, '/etc/portage/package.xlat')
+    with open(path, 'r') as xlat_file:
+        xlats = xlat_file.readlines()
+
+    for xlat in xlats:
+        atom, real = xlat.split('\t')
+        real = real.rstrip()
+        if '{cat}/{pn}'.format(cat=category, pn=pn) == atom:
+            return real
     return pn
 
 
@@ -206,7 +217,10 @@ def _translate_dep(dep):
     ver = dep.version
 
     if dep.blocker:
-        package = '!' + package
+        if dep.use is None:
+            package = '!' + package
+        else:
+            return None
 
     if dep_op is None and ver is None:
         # "Easy" dep.
@@ -242,7 +256,7 @@ def _maybe_package_provides(settings, pkgname):
     virtual_path = os.path.join(root, '/etc/apkkit/virtual', pkgname)
     if os.path.exists(virtual_path):
         with open(virtual_path, 'r') as virtual_file:
-            provides += ['v:' + virtual for virtual in virtual_file.readlines()]
+            provides += virtual_file.readlines()
 
     return provides
 
@@ -291,7 +305,8 @@ def native(settings, mydbapi=None):
         run_deps = _deps_need_an_adult(params['name'], settings['PVR'],
                                        settings['EAPI'])
 
-    params['depends'] = map(_translate_dep, run_deps)
+    params['depends'] = list(filterfalse(lambda x: x is None,
+                                         map(_translate_dep, run_deps)))
 
     params['provides'] = _maybe_package_provides(settings, params['name'])
 
