@@ -15,6 +15,7 @@ from copy import deepcopy
 from fnmatch import fnmatch
 from functools import partial
 from itertools import chain
+from pathlib import Path
 from subprocess import Popen, PIPE
 from tempfile import mkstemp
 
@@ -364,9 +365,7 @@ class APKFile:
         splits += load_package_split(package)
         splits = [split for split in splits if split is not None]
 
-        exclude_from_base = list(chain.from_iterable([
-            [path for path in split['paths']] for split in splits
-        ]))
+        exclude_from_base = []
 
         for split in splits:
             split_package = deepcopy(package)
@@ -385,12 +384,23 @@ class APKFile:
             else:
                 split_package._provides = []
 
+            file_matches = []
+            for path in split['paths']:
+                if '*' in path:
+                    file_matches += [str(f.relative_to(datadir))
+                                     for f in Path(datadir).glob(path)]
+                    split['paths'].remove(path)
+
+            split['paths'] += file_matches
+
             LOGGER.info('Probing for split package: %s', split_package.name)
             combined = APKFile._create_file(split_package, datadir, sign,
                                             signfile, data_hash, hash_method,
                                             mode, partial(split_filter, split))
             if combined:
                 files.append(cls(fileobj=combined, package=split_package))
+
+            exclude_from_base += [path for path in split['paths']]
 
         LOGGER.info('Processing main package: %s', package.name)
         combined = APKFile._create_file(package, datadir, sign, signfile,
