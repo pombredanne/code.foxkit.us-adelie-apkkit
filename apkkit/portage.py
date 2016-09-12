@@ -226,8 +226,8 @@ def _translate_dep(dep):
         # "Easy" dep.
         return package
 
-    if dep_op == '~':
-        dep_op = '='  # broken
+    #if dep_op == '~':
+    #    dep_op = '='  # broken
     # apk-tools/src/package.c:195
     # there is literally no other documentation for this format.
     return '{name}{op}{ver}'.format(name=package, op=dep_op, ver=ver)
