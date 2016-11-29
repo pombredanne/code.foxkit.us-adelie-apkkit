@@ -2,13 +2,13 @@
  APK Kit
 =========
 :Authors:
-  * **Andrew Wilcox**
+  * **A. Wilcox**
 :Version:
   1.0
 :Status:
   Alpha
 :Copyright:
-  © 2015 Wilcox Technologies LLC.  NCSA open source licence.
+  © 2015-2016 Adélie Linux Team.  NCSA open source licence.
 
 
 
@@ -26,7 +26,7 @@ need a pure Python library for maintaining APK repositories.
 Objectives / success criteria
 -----------------------------
 * Compatibility with upstream APK Tools.
-* Stable v1 release by October 2015.
+* Stable v1 release by December 2016.
 * Minimal to no external dependencies.
 
 
