@@ -198,7 +198,7 @@ class Package:
             if len(line) == 0 or line[0] == '#':
                 continue
 
-            if line.index('=') == -1:
+            if line.find('=') == -1:
                 PACKAGE_LOGGER.warning('!!! malformed line? "%s" !!!', line)
                 continue
 
