@@ -69,6 +69,19 @@ def load_package_split(package):
     return splits
 
 
+def skip_split():
+    """Return the list of packages that should not be split globally."""
+
+    try:
+        with open('/etc/apkkit/split/skip.conf') as skipconf:
+            skips = [pkg[:-1] for pkg in skipconf.readlines()]
+    except OSError:
+        LOGGER.error('No global skip-split package information file.')
+        skips = []
+
+    return skips
+
+
 def path_components(path):
     """Find all directories that make up a full path."""
 
@@ -361,9 +374,12 @@ class APKFile:
 
         files = []
 
-        splits = load_global_split()
-        splits += load_package_split(package)
-        splits = [split for split in splits if split is not None]
+        if package.name in skip_split():
+            splits = []
+        else:
+            splits = load_global_split()
+            splits += load_package_split(package)
+            splits = [split for split in splits if split is not None]
 
         exclude_from_base = []
 
