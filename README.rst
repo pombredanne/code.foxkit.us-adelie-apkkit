@@ -4,7 +4,7 @@
 :Authors:
   * **A. Wilcox**
 :Version:
-  1.0
+  0.5
 :Status:
   Alpha
 :Copyright:
