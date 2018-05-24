@@ -34,9 +34,9 @@ setup(
         'Topic :: System :: Archiving :: Packaging',
         'Topic :: System :: Software Distribution',
     ],
-    keywords=('adelie', 'alpine', 'apk', 'linux', 'packaging'),
-    packages=['apkkit'],
-    install_requires=[
+    keywords='adelie,alpine,apk,linux,packaging',
+    packages=['apkkit', 'apkkit.base', 'apkkit.io'],
+    requires=[
         'cryptography',
         'jinja',
         'pyyaml',
