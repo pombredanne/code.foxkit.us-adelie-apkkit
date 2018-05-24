@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 from codecs import open
 from os import path
 
@@ -13,8 +13,8 @@ with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
 
 setup(
     name='apkkit',
-    version='0.5',
-    description='Manage APK packages from Python',
+    version='0.6.0',
+    description='Manage APK packages and repositories from Python',
     long_description=long_description,
     url='http://adelielinux.org/',
     author='A. Wilcox',
@@ -35,10 +35,11 @@ setup(
         'Topic :: System :: Software Distribution',
     ],
     keywords='apk packaging portage',
-    packages=('apkkit',),
+    packages=find_packages(),
     install_requires=[
         'cryptography',
         'jinja',
         'pyyaml',
+        'requests',
     ]
 )
