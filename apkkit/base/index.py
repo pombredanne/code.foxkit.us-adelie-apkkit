@@ -3,13 +3,25 @@
 from io import BytesIO
 import logging
 import os
-import requests
 import tarfile
 
 from apkkit.base.package import Package
 
 
 INDEX_LOGGER = logging.getLogger(__name__)
+"""The logger for messages coming from this module."""
+
+
+try:
+    # logger needed.  pylint: disable=wrong-import-order,wrong-import-position
+    import requests
+    HAVE_REQUESTS = True
+    """Determines if the `requests` module is available."""
+except ImportError:
+    INDEX_LOGGER.warning("You need install Requests to load indexes over "
+            "the network.")
+    HAVE_REQUESTS = False
+    """Determines if the `requests` module is available."""
 
 
 class Index:
@@ -28,9 +40,11 @@ class Index:
         :param str url:
             (Optional) The URL to download the index from.  All other
             parameters are ignored if this is specified.
+
+        .. note:: URL downloading requires the Requests module to be installed.
         """
 
-        if url is not None:
+        if HAVE_REQUESTS and url is not None:
             self._url = url
             resp = requests.get(url)
             if resp.status_code != 200:
