@@ -1,5 +1,5 @@
-from setuptools import setup, find_packages
 from codecs import open
+from distutils.core import setup
 from os import path
 
 
@@ -14,9 +14,9 @@ with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
 setup(
     name='apkkit',
     version='0.6.0',
-    description='Manage APK packages and repositories from Python',
+    description='Manipulate APK packages and repositories from Python',
     long_description=long_description,
-    url='http://adelielinux.org/',
+    url='https://code.foxkit.us/adelie/apkkit',
     author='A. Wilcox',
     author_email='awilfox@adelielinux.org',
     license='NCSA',
@@ -34,8 +34,8 @@ setup(
         'Topic :: System :: Archiving :: Packaging',
         'Topic :: System :: Software Distribution',
     ],
-    keywords='apk packaging portage',
-    packages=find_packages(),
+    keywords=('adelie', 'alpine', 'apk', 'linux', 'packaging'),
+    packages=['apkkit'],
     install_requires=[
         'cryptography',
         'jinja',

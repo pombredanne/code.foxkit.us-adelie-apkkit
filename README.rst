@@ -4,11 +4,11 @@
 :Authors:
   * **A. Wilcox**
 :Version:
-  0.5
+  0.6
 :Status:
-  Alpha
+  Beta
 :Copyright:
-  © 2015-2016 Adélie Linux Team.  NCSA open source licence.
+  © 2015-2018 Adélie Linux Team.  NCSA open source licence.
 
 
 
@@ -17,16 +17,15 @@ Requirements
 
 Background
 ----------
-Our new Linux distro (codename Adélie) combines pieces of Portage, a stable
-Python-based package build system, with the AlpineLinux package format, APK.  We
-need a pure Python library for manipulating and verifying APK packages.  We also
-need a pure Python library for maintaining APK repositories.
+Adélie Linux, our distribution, uses the Alpine Linux APK package manager.
+We need a pure Python library for manipulating and verifying APK packages.
+We also need a pure Python library for maintaining APK repositories.
 
 
 Objectives / success criteria
 -----------------------------
 * Compatibility with upstream APK Tools.
-* Stable v1 release by December 2016.
+* Stable v1 release by December 2018.
 * Minimal to no external dependencies.
 
 
@@ -43,7 +42,7 @@ Major features
 
 #. Creation of APK files.
 
-#. Keep repository INDEX files up to date.
+#. Read repository INDEX files to gather information on available packages.
 
 
 
